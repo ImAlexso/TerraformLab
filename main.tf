@@ -1,62 +1,68 @@
-terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 4.0"
-      #In the documentation they specify version 4.1.0, but instead of pinning to a fixed version it's better to use ~> 4.0 so the provider can receive compatible updates without locking it to a single version.
-    }
-  }
+# ════════════════════════════════════════════════════════════════
+# Locals: variables calculadas que usamos internamente
+# ════════════════════════════════════════════════════════════════
+
+locals {
+  # Construimos los nombres siguiendo la convención:
+  # tipo-proyecto-entorno-region
+  # Ejemplo: rg-miproyecto-dev-we
+  suffix = "${var.project_name}-${var.environment}-${var.location_short}"
 }
-# Configure the Microsoft Azure Provider
-provider "azurerm" {
-  resource_provider_registrations = "none" # This is only required when the User, Service Principal, or Identity running Terraform lacks the permissions to register Azure Resource Providers.
-  features {}
-}
+
 # Create a resource group
 resource "azurerm_resource_group" "rg" {
-  name     = "rg-terraform-lab"
-  location = "West Europe"
+  name     = "rg-${local.suffix}"
+  location = var.location
+  # Tags: etiquetas para organizar y filtrar recursos en Azure
+  tags = {
+    environment = var.environment
+    project     = var.project_name
+    managed_by  = "terraform"
+  }
 }
 # Create a Vnet
 resource "azurerm_virtual_network" "vnet" {
-  name                = "vnet-terraform-lab"
+  name                = "vnet-${local.suffix}"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
-  address_space       = ["10.0.0.0/16"]
+  address_space       = [var.vnet_address_space]
+
+  tags = azurerm_resource_group.rg.tags
 }
 #create a SubNet
 resource "azurerm_subnet" "subnet" {
-  name                 = "subnet-terraform-lab"
+  name                 = "subnet-${local.suffix}"
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes     = ["10.0.1.0/24"]
+  address_prefixes     = [var.subnet_address_prefix]
 }
 #create a NIC for de VM
 resource "azurerm_network_interface" "nic" {
-  name                = "nic-terraform-lab"
+  name                = "nic-${local.suffix}"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
 
   ip_configuration {
-    name                          = "ipconfig1"
+    name                          = "internal"
     subnet_id                     = azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
   }
 }
 
 resource "azurerm_linux_virtual_machine" "vm" {
-  name                = "vm-terraform-lab"
+  name                = "vm-${local.suffix}"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
-  size                = "Standard_B1s"
+  size                = var.vm_size
 
-  admin_username = var.admin_username
-  admin_password = var.admin_password
+  admin_username                  = var.vm_admin_username
+  admin_password                  = var.vm_admin_password
   disable_password_authentication = false
 
   network_interface_ids = [azurerm_network_interface.nic.id]
 
   os_disk {
+    name                 = "osdisk-${local.suffix}"
     caching              = "ReadWrite"
     storage_account_type = "Standard_LRS"
   }
@@ -67,4 +73,6 @@ resource "azurerm_linux_virtual_machine" "vm" {
     sku       = "22_04-lts"
     version   = "latest"
   }
+
+  tags = azurerm_resource_group.rg.tags
 }
